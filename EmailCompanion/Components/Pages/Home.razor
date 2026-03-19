@@ -1,0 +1,284 @@
+@page "/"
+@inject TemplateFileService FileService
+@inject TemplateRenderService RenderService
+@inject TemplateSchemaService SchemaService
+
+@if (!FileService.IsConfigured)
+{
+    <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-state-icon">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+            <polyline points="14 2 14 8 20 8" />
+        </svg>
+        <h2>No repository configured</h2>
+        <p>Set the path to your notification service repository to get started.</p>
+        <a class="btn btn-primary" href="settings">Open Settings</a>
+    </div>
+}
+else
+{
+    <div class="workspace">
+        @* Template list *@
+        <div class="template-list-panel">
+            <div class="panel-header">
+                <input type="text" class="search-input" placeholder="Filter templates..."
+                       @bind="searchFilter" @bind:event="oninput" />
+            </div>
+            <div class="template-list">
+                @foreach (var template in FilteredTemplates)
+                {
+                    <button class="template-item @(template.FullPath == selectedTemplate?.FullPath ? "active" : "")"
+                            @onclick="() => SelectTemplate(template)">
+                        <span class="template-name">@template.FileName</span>
+                        <span class="template-path">@template.RelativePath</span>
+                    </button>
+                }
+                @if (!FilteredTemplates.Any())
+                {
+                    <div class="panel-empty-state panel-empty-state-compact text-muted">
+                        No templates found.
+                    </div>
+                }
+            </div>
+        </div>
+
+        @* Form / Source panel *@
+        <div class="form-panel">
+            <div class="tab-bar">
+                <button class="tab @(activeTab == "fields" ? "active" : "")" @onclick='() => activeTab = "fields"'>
+                    Fields (@fields.Count)
+                </button>
+                <button class="tab @(activeTab == "source" ? "active" : "")" @onclick='() => activeTab = "source"'>
+                    Source
+                </button>
+                @if (!string.IsNullOrWhiteSpace(selectedModelType))
+                {
+                    <span class="badge badge-muted">@selectedModelType</span>
+                }
+                <div class="tab-bar-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="RenderPreview" disabled="@(selectedTemplate is null || isRendering)">
+                        @(isRendering ? "Rendering..." : "Preview")
+                    </button>
+                </div>
+            </div>
+
+            @if (selectedTemplate is null)
+            {
+                <div class="panel-empty-state text-muted">
+                    Select a template from the list.
+                </div>
+            }
+            else if (activeTab == "fields")
+            {
+                <div class="fields-panel">
+                    <div class="fields-toolbar">
+                        <button class="btn btn-secondary btn-sm" @onclick="AutoFill">Auto-fill sample data</button>
+                        <button class="btn btn-ghost btn-sm" @onclick="ClearAll">Clear all</button>
+                    </div>
+
+                    @if (!fields.Any())
+                    {
+                        <div class="panel-empty-state text-muted">
+                            No @@Model references found in this template.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="fields-list">
+                            @foreach (var field in fields)
+                            {
+                                <div class="field-group">
+                                    <label>
+                                        @field.DisplayName
+                                        @if (field.ValueType != TemplateValueType.Text)
+                                        {
+                                            <span class="badge badge-muted">@GetValueTypeLabel(field)</span>
+                                        }
+                                        @if (field.IsCollection)
+                                        {
+                                            <span class="badge badge-info">list</span>
+                                        }
+                                        @if (field.IsConditional)
+                                        {
+                                            <span class="badge badge-warning">conditional</span>
+                                        }
+                                    </label>
+                                    @if (field.ValueType == TemplateValueType.Boolean)
+                                    {
+                                        <select @bind="field.Value">
+                                            <option value=""></option>
+                                            <option value="true">True</option>
+                                            <option value="false">False</option>
+                                        </select>
+                                    }
+                                    else if (field.UsesTextArea)
+                                    {
+                                        <textarea rows="3" @bind="field.Value" @bind:event="oninput"
+                                                  placeholder="@GetPlaceholder(field)"></textarea>
+                                    }
+                                    else
+                                    {
+                                        <input type="@GetInputType(field)"
+                                               @bind="field.Value"
+                                               @bind:event="oninput"
+                                               step="@GetInputStep(field)"
+                                               placeholder="@GetPlaceholder(field)" />
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="source-panel">
+                    <pre><code>@templateSource</code></pre>
+                </div>
+            }
+        </div>
+
+        @* Preview panel *@
+        <div class="preview-panel">
+            <div class="panel-header preview-header">
+                <span>Preview</span>
+                @if (renderResult is { Success: false })
+                {
+                    <span class="badge badge-danger">Error</span>
+                }
+            </div>
+            <div class="preview-content">
+                @if (renderResult is not null)
+                {
+                    <iframe sandbox="" srcdoc="@renderResult.Html" class="preview-iframe"></iframe>
+                }
+                else
+                {
+                    <div class="panel-empty-state text-muted">
+                        Fill in the fields and click Preview
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string searchFilter = "";
+    private string activeTab = "fields";
+    private TemplateFileInfo? selectedTemplate;
+    private string? selectedModelType;
+    private string? templateSource;
+    private List<TemplateField> fields = [];
+    private RenderResult? renderResult;
+    private bool isRendering;
+    private List<TemplateFileInfo> allTemplates = [];
+
+    protected override void OnInitialized()
+    {
+        if (FileService.IsConfigured)
+        {
+            allTemplates = FileService.GetTemplates();
+        }
+    }
+
+    private IEnumerable<TemplateFileInfo> FilteredTemplates =>
+        string.IsNullOrWhiteSpace(searchFilter)
+            ? allTemplates
+            : allTemplates.Where(t => t.RelativePath.Contains(searchFilter, StringComparison.OrdinalIgnoreCase));
+
+    private void SelectTemplate(TemplateFileInfo template)
+    {
+        selectedTemplate = template;
+        templateSource = FileService.ReadTemplate(template.FullPath);
+        selectedModelType = template.DeclaredModelType;
+        renderResult = null;
+
+        if (templateSource is not null)
+        {
+            var descriptor = SchemaService.Describe(template.RelativePath, templateSource);
+            selectedModelType = descriptor.DeclaredModelType;
+            fields = descriptor.Fields;
+        }
+        else
+        {
+            fields = [];
+            selectedModelType = null;
+        }
+
+        activeTab = "fields";
+    }
+
+    private async Task RenderPreview()
+    {
+        if (selectedTemplate is null) return;
+
+        isRendering = true;
+        renderResult = await RenderService.RenderAsync(selectedTemplate.FullPath, fields);
+        isRendering = false;
+    }
+
+    private void AutoFill()
+    {
+        foreach (var field in fields)
+        {
+            if (string.IsNullOrWhiteSpace(field.Value))
+            {
+                field.Value = SchemaService.CreateSampleValue(field);
+            }
+        }
+    }
+
+    private void ClearAll()
+    {
+        foreach (var field in fields)
+        {
+            field.Value = "";
+        }
+        renderResult = null;
+    }
+
+    private string GetInputType(TemplateField field)
+    {
+        return field.ValueType switch
+        {
+            TemplateValueType.Email => "email",
+            TemplateValueType.Url => "url",
+            TemplateValueType.Integer => "number",
+            TemplateValueType.Decimal => "number",
+            TemplateValueType.Date => "date",
+            TemplateValueType.DateTime => "datetime-local",
+            _ => "text"
+        };
+    }
+
+    private string? GetInputStep(TemplateField field)
+    {
+        return field.ValueType switch
+        {
+            TemplateValueType.Integer => "1",
+            TemplateValueType.Decimal => "0.01",
+            _ => null
+        };
+    }
+
+    private string GetPlaceholder(TemplateField field) => SchemaService.GetPlaceholder(field);
+
+    private static string GetValueTypeLabel(TemplateField field)
+    {
+        return field.ValueType switch
+        {
+            TemplateValueType.MultilineText => "multiline",
+            TemplateValueType.Email => "email",
+            TemplateValueType.Url => "url",
+            TemplateValueType.Integer => "integer",
+            TemplateValueType.Decimal => "decimal",
+            TemplateValueType.Boolean => "boolean",
+            TemplateValueType.Date => "date",
+            TemplateValueType.DateTime => "datetime",
+            TemplateValueType.Json => "json",
+            TemplateValueType.Collection => "collection",
+            _ => "text"
+        };
+    }
+}

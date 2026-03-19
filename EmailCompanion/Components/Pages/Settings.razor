@@ -1,0 +1,119 @@
+@page "/settings"
+@inject AppConfigService ConfigService
+
+<div class="settings-page">
+    <h1>Settings</h1>
+
+    <section class="settings-section">
+        <h2>Template source</h2>
+
+        <div class="form-group">
+            <label for="repoRoot">Repository root path</label>
+            <input id="repoRoot" type="text" @bind="config.RepoRootPath" @bind:event="oninput"
+                   placeholder="C:\repos\notification-service" />
+             <small class="text-muted">Leave blank to use the workspace root when a checked-in EmailTemplates folder is present.</small>
+        </div>
+
+        <div class="form-group">
+            <label for="templateSubfolder">Template subfolder</label>
+            <input id="templateSubfolder" type="text" @bind="config.TemplateSubfolder" @bind:event="oninput"
+                 placeholder="@AppConfigService.DefaultTemplateSubfolder" />
+        </div>
+
+        <div class="path-preview">
+            <span class="path-preview-label">Full path:</span>
+            <code>@ComputedPath</code>
+            @if (!string.IsNullOrWhiteSpace(ComputedPath))
+            {
+                @if (Directory.Exists(ComputedPath))
+                {
+                    <span class="badge badge-success">Found</span>
+                }
+                else
+                {
+                    <span class="badge badge-danger">Not found</span>
+                }
+            }
+        </div>
+    </section>
+
+    <section class="settings-section">
+        <h2>SMTP configuration <span class="badge badge-muted">v2</span></h2>
+        <p class="text-muted">SMTP sending will be available in a future version.</p>
+
+        <div class="form-group">
+            <label for="smtpHost">SMTP host</label>
+            <input id="smtpHost" type="text" disabled value="@config.SmtpHost" placeholder="smtp.example.com" />
+        </div>
+        <div class="form-group">
+            <label for="smtpPort">SMTP port</label>
+            <input id="smtpPort" type="number" disabled value="@config.SmtpPort" />
+        </div>
+        <div class="form-group">
+            <label for="smtpUser">Username</label>
+            <input id="smtpUser" type="text" disabled value="@config.SmtpUser" />
+        </div>
+        <div class="form-group">
+            <label for="defaultRecipient">Default recipient</label>
+            <input id="defaultRecipient" type="email" disabled value="@config.DefaultRecipientEmail" placeholder="dev@example.com" />
+        </div>
+    </section>
+
+    <div class="settings-actions">
+        <button class="btn btn-primary" @onclick="Save">Save</button>
+        @if (showSaved)
+        {
+            <span class="badge badge-success save-confirmation">Saved</span>
+        }
+    </div>
+</div>
+
+@code {
+    private AppConfig config = new();
+    private bool showSaved;
+    private CancellationTokenSource? dismissCts;
+
+    protected override void OnInitialized()
+    {
+        // Clone the current config so changes are staged until save
+        var current = ConfigService.Config;
+        config = new AppConfig
+        {
+            RepoRootPath = current.RepoRootPath,
+            TemplateSubfolder = current.TemplateSubfolder,
+            SmtpHost = current.SmtpHost,
+            SmtpPort = current.SmtpPort,
+            SmtpUser = current.SmtpUser,
+            SmtpPassword = current.SmtpPassword,
+            DefaultSenderEmail = current.DefaultSenderEmail,
+            DefaultRecipientEmail = current.DefaultRecipientEmail
+        };
+    }
+
+    private string? ComputedPath
+    {
+        get
+        {
+            return ConfigService.GetTemplateFolderFullPath(config);
+        }
+    }
+
+    private async Task Save()
+    {
+        ConfigService.Save(config);
+
+        dismissCts?.Cancel();
+        dismissCts = new CancellationTokenSource();
+        showSaved = true;
+
+        try
+        {
+            await Task.Delay(2000, dismissCts.Token);
+            showSaved = false;
+        }
+        catch (TaskCanceledException)
+        {
+            // Another save happened; keep showing
+        }
+    }
+}

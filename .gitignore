@@ -1,0 +1,20 @@
+# .NET build outputs
+**/bin/
+**/obj/
+
+# Build artifacts
+.artifacts/
+
+# Compiled assemblies and symbols
+*.dll
+*.exe
+*.pdb
+
+# Visual Studio and user-specific files
+.vs/
+*.user
+*.rsuser
+*.suo
+
+# Editor-local settings
+.vscode/
