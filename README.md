@@ -86,7 +86,7 @@ For each template it captures:
 - conditional references used in `@if`,
 - collection references used in `@foreach`.
 
-These references are normalized into field paths such as `Facility.Name` and surfaced in the form UI.
+The parser also detects explicit `(string)Model.Property` casts in template source and uses that to override type inference, forcing the field to a text type instead of boolean or another inferred type.
 
 ### 5. Field typing and sample data
 
@@ -97,14 +97,21 @@ When a field is not explicitly defined, the app infers a type from the field nam
 - `Email` becomes an email field,
 - `Url` or `Link` becomes a URL field,
 - `Id` becomes an integer field,
-- `Is...` or `Has...` becomes a boolean field,
-- `Date` or `Time` becomes a date or datetime field.
+- `Is...`, `Has...`, `Can...`, `Should...`, `Include...`, `Allow...`, `Enable...`, `Show...`, `Use...`, `Was...`, or `Were...` becomes a boolean field,
+- `Date`, `Time`, `At`, or `Utc` becomes a date or datetime field,
+- `Count`, `Number`, or `Port` becomes an integer field,
+- `Amount`, `Rate`, `Price`, or `Total` becomes a decimal field,
+- `Note`, `Message`, `Description`, `Body`, or `Text` becomes a multiline text field.
 
 The same service also provides placeholders and default sample values for fast previewing.
 
 ### 6. Preview rendering
 
 `TemplateRenderService` reads the selected template, removes the `@model` directive, builds a dynamic object from the entered field values, and renders the template with RazorLight.
+
+Field values are passed to the template through a custom `DynamicObject` wrapper backed by Newtonsoft `JToken`. This wrapper supports dynamic property access, index access, type conversion, and enumeration so that templates can interact with the model naturally.
+
+Some templates receive special treatment. For example, `LotusOne\ClientVendorEmail.cshtml` has dedicated normalization logic that supplies default table, button, header, body, signature, and footer structures when those fields are missing.
 
 Important implementation details:
 
@@ -173,12 +180,40 @@ Then open the local URL shown by ASP.NET Core in your browser.
 6. Auto-fill sample data or enter values manually.
 7. Click Preview and inspect the rendered HTML.
 
+## Known schema definitions
+
+The app ships with hardcoded schemas for the following DTO types and templates:
+
+- `Aya.Core.Dto.Contracts.ContractRequestEmailInfoDto`
+- `Aya.Core.DTO.Travelers.TravelerExtensionRequestNotificationTemplateDto`
+- `Aya.Core.DTO.Offer.ContractsTeamCandidateOfferEmailInfoDto`
+- `LotusOne\ClientVendorEmail.cshtml` (path-based schema with detailed sample values)
+
+Templates that declare one of these `@model` types get their fields and sample values from the schema rather than from inference alone.
+
+## Security
+
+`TemplateFileService` validates that requested template paths start with the configured template root and end with `.cshtml` before reading, preventing path-traversal attacks.
+
 ## Project structure
 
 ```text
 NotificationCompanion.sln
-EmailCompanion/          Blazor Server app
-EmailTemplates/          Local template source consumed by the app
+EmailCompanion/                          Blazor Server app
+  Program.cs                             Entry point and DI registration
+  Components/Pages/
+    Home.razor                           Templates page (home)
+    Settings.razor                       Settings page
+  Components/Layout/
+    MainLayout.razor                     Sidebar navigation and layout shell
+  Services/
+    AppConfigService.cs                  Config persistence and template path resolution
+    TemplateFileService.cs               Recursive .cshtml discovery and file reading
+    TemplateParserService.cs             Regex-based field extraction from template source
+    TemplateSchemaService.cs             Field typing, schema merging, and sample data
+    TemplateRenderService.cs             RazorLight compilation and dynamic model building
+    TemplateMetadataModels.cs            Shared models (TemplateField, TemplateDescriptor, etc.)
+EmailTemplates/                          Local template source consumed by the app
 ```
 
 ## Future direction already hinted in the code
